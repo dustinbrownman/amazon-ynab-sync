@@ -2,17 +2,32 @@ import IMAP from "node-imap";
 import * as cheerio from "cheerio";
 import quotedPrintable from "quoted-printable";
 import { dateFormat, dollarFormat } from "./index.js";
+import YNAB, { Order } from "./ynab.js";
 
 const HISTORICAL_SEARCH_NUM_EMAILS = parseInt(
-  process.env.HISTORICAL_SEARCH_NUM_EMAILS
+  process.env.HISTORICAL_SEARCH_NUM_EMAILS || "500"
 );
 
-const isAmazonEmail = ({ subject }) =>
+interface Email {
+  from: string;
+  subject: string;
+  body: string;
+  attributes: IMAP.ImapMessageAttributes;
+}
+
+interface EmailHeader {
+  from: string;
+  subject: string;
+  attributes: IMAP.ImapMessageAttributes;
+  body?: string;
+}
+
+const isAmazonEmail = ({ subject }: { subject: string }): boolean =>
   subject.includes("Your Amazon.com order") &&
   !subject.includes("has shipped") &&
   !subject.includes("has been canceled");
 
-const scanEmail = (email) => {
+const scanEmail = (email: Email): Order | undefined => {
   const { from, subject, body, attributes } = email;
 
   if (!isAmazonEmail(email)) {
@@ -33,7 +48,7 @@ const scanEmail = (email) => {
 
     if (amount === 0) return;
 
-    const items = [];
+    const items: string[] = [];
     const itemRows = $('table[id$="itemDetails"] tr').toArray();
     for (const itemRow of itemRows) {
       // If you're here because you want the item names to be more detailed,
@@ -70,11 +85,11 @@ const scanEmail = (email) => {
   }
 };
 
-const readEmail = (imapMsg, readBody = true) =>
+const readEmail = (imapMsg: IMAP.ImapMessage, readBody = true): Promise<Email | EmailHeader> =>
   new Promise((resolve, reject) => {
-    let headers = null;
-    let body = null;
-    let attributes = null;
+    let headers: any = null;
+    let body: string | null = null;
+    let attributes: IMAP.ImapMessageAttributes | null = null;
     imapMsg.once("attributes", function (attrs) {
       attributes = attrs;
     });
@@ -108,24 +123,24 @@ const readEmail = (imapMsg, readBody = true) =>
           from: headers.from[0],
           subject: headers.subject[0],
           attributes,
-          body,
-        });
+          body: body || "",
+        } as Email | EmailHeader);
       } else {
         reject();
       }
     });
   });
 
-const fetchOrderEmails = async (seq, startIndex, endIndex) =>
+const fetchOrderEmails = async (seq: any, startIndex: number, endIndex: number): Promise<Email[]> =>
   new Promise((resolve, reject) => {
     const fetch = seq.fetch(`${startIndex}:${endIndex}`, {
       bodies: ["HEADER.FIELDS (FROM SUBJECT)", "TEXT"],
       struct: true,
     });
-    const emails = [];
-    fetch.on("message", async (imapMsg) => {
+    const emails: Email[] = [];
+    fetch.on("message", async (imapMsg: any) => {
       try {
-        const email = await readEmail(imapMsg, true);
+        const email = await readEmail(imapMsg, true) as Email;
         emails.push(email);
       } catch (e) {
         console.error(e);
@@ -134,12 +149,12 @@ const fetchOrderEmails = async (seq, startIndex, endIndex) =>
     fetch.once("end", function () {
       resolve(emails);
     });
-    fetch.once("error", function (err) {
+    fetch.once("error", function (err: any) {
       reject(err);
     });
   });
 
-export const historicalSearch = async (imap, ynab, box, orders) =>
+export const historicalSearch = async (imap: IMAP, ynab: YNAB, box: IMAP.Box, orders: Order[]): Promise<void> =>
   new Promise((resolve) => {
     console.log(
       `Searching back over last ${HISTORICAL_SEARCH_NUM_EMAILS} emails...`
@@ -152,15 +167,15 @@ export const historicalSearch = async (imap, ynab, box, orders) =>
       struct: true,
     });
 
-    const emailFetches = [];
-    const amazonMsgSeqNums = [];
+    const emailFetches: Promise<void>[] = [];
+    const amazonMsgSeqNums: number[] = [];
     let processedEmails = 0;
 
     fetch.on("message", (imapMsg, seqno) => {
       emailFetches.push(
         new Promise(async (resolve, reject) => {
           try {
-            const email = await readEmail(imapMsg, false);
+            const email = await readEmail(imapMsg, false) as EmailHeader;
             if (isAmazonEmail(email)) amazonMsgSeqNums.push(seqno);
             processedEmails++;
             console.log(
@@ -168,15 +183,15 @@ export const historicalSearch = async (imap, ynab, box, orders) =>
             );
             resolve();
           } catch (e) {
-            console.error(e0);
+            console.error(e);
             reject();
           }
         })
       );
     });
 
-    fetch.on("error", (err) => {
-      throw new Error(err);
+    fetch.on("error", (err: any) => {
+      throw new Error(String(err));
     });
 
     fetch.once("end", async () => {
@@ -187,11 +202,11 @@ export const historicalSearch = async (imap, ynab, box, orders) =>
         `${amazonEmailCount} Amazon order confirmation emails found`
       );
 
-      const emailScans = [];
+      const emailScans: Promise<void>[] = [];
 
       amazonMsgSeqNums.forEach((seqno) => {
         emailScans.push(
-          new Promise(async (resolve) => {
+          new Promise(async (resolve, reject) => {
             try {
               const [email] = await fetchOrderEmails(imap.seq, seqno, seqno);
               const order = await scanEmail(email);
@@ -211,7 +226,7 @@ export const historicalSearch = async (imap, ynab, box, orders) =>
 
       if (orders.length > 0) {
         orders.sort(function (a, b) {
-          return new Date(a.date) - new Date(b.date);
+          return new Date(a.date).getTime() - new Date(b.date).getTime();
         });
 
         const sinceDate = orders[0].date;
@@ -224,8 +239,8 @@ export const historicalSearch = async (imap, ynab, box, orders) =>
     });
   });
 
-export const watchInbox = (imap, ynab, box, orders) => {
-  imap.on("mail", async (newEmailCount) => {
+export const watchInbox = (imap: IMAP, ynab: YNAB, box: IMAP.Box, orders: Order[]): void => {
+  imap.on("mail", async (newEmailCount: number) => {
     console.log(`${newEmailCount} new email(s), scanning contents...`);
     const endIndex = box.messages.total;
     const startIndex = endIndex - (newEmailCount - 1);

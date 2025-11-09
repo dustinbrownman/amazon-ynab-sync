@@ -1,8 +1,8 @@
 import "dotenv/config";
-import ynab from "ynab";
+import * as ynab from "ynab";
 import { dollarFormat } from "./index.js";
 
-const ynabAPI = new ynab.API(process.env.YNAB_TOKEN);
+const ynabAPI = new ynab.API(process.env.YNAB_TOKEN || "");
 
 const YNAB_ACCEPTABLE_DOLLAR_DIFFERENCE = process.env
   .YNAB_ACCEPTABLE_DOLLAR_DIFFERENCE
@@ -14,17 +14,35 @@ const YNAB_ACCEPTABLE_DATE_DIFFERENCE = process.env
   ? parseFloat(process.env.YNAB_ACCEPTABLE_DATE_DIFFERENCE)
   : 4;
 
-export default class YNAB {
-  budget = null;
-  transactionsServerKnowledge = undefined;
-  transactions = {}; // TODO: does not get updated on memo updates
+interface Order {
+  date: Date;
+  amount: number;
+  items: string[];
+}
 
-  static prettyTransaction = (t) => {
+interface Match {
+  dateDifference: number;
+  priceDifference: number;
+  orderIndex: number;
+  transactionId: string;
+}
+
+interface FinalMatch {
+  transactionId: string;
+  order: Order;
+}
+
+export default class YNAB {
+  budget: ynab.BudgetSummary | null = null;
+  transactionsServerKnowledge: number | undefined = undefined;
+  transactions: Record<string, ynab.TransactionDetail> = {}; // TODO: does not get updated on memo updates
+
+  static prettyTransaction = (t: ynab.TransactionDetail): string => {
     const amount = dollarFormat(t.amount / 1000);
     return `${t.payee_name} transaction on ${t.date} of ${amount}`;
   };
 
-  init = async () => {
+  init = async (): Promise<void> => {
     console.log("Connecting to YNAB...");
 
     const budgetsResponse = await ynabAPI.budgets.getBudgets();
@@ -40,12 +58,12 @@ export default class YNAB {
     this.budget = budget;
   };
 
-  getCachedTransactionCount = () => Object.keys(this.transactions).length;
+  getCachedTransactionCount = (): number => Object.keys(this.transactions).length;
 
-  fetchTransactions = async (sinceDate = undefined) => {
+  fetchTransactions = async (sinceDate: Date | undefined = undefined): Promise<void> => {
     const { transactions, server_knowledge } = (
       await ynabAPI.transactions.getTransactions(
-        this.budget.id,
+        this.budget!.id,
         sinceDate ? sinceDate.toISOString().split("T")[0] : undefined,
         undefined,
         this.transactionsServerKnowledge
@@ -58,7 +76,7 @@ export default class YNAB {
     transactions
       .filter(
         (t) =>
-          t.payee_name.toLowerCase().includes("amazon") &&
+          t.payee_name?.toLowerCase().includes("amazon") &&
           (typeof t.memo !== "string" || t.memo.length == 0)
       )
       .forEach((t) => {
@@ -73,10 +91,10 @@ export default class YNAB {
       });
   };
 
-  matchTransactions = (orders) => {
-    if (orders.length === 0) return;
+  matchTransactions = (orders: Order[]): FinalMatch[] => {
+    if (orders.length === 0) return [];
 
-    let nearOrPerfectMatches = [];
+    let nearOrPerfectMatches: Match[] = [];
 
     orderLoop: for (const [orderIndex, order] of orders.entries()) {
       for (const [transactionId, transaction] of Object.entries(
@@ -85,7 +103,7 @@ export default class YNAB {
         if (transaction.memo && transaction.memo.length > 0) continue;
 
         const dateDifference = Math.abs(
-          order.date - new Date(transaction.date)
+          order.date.getTime() - new Date(transaction.date).getTime()
         );
         const priceDifference = Math.abs(
           Math.abs(order.amount) - Math.abs(transaction.amount)
@@ -123,10 +141,10 @@ export default class YNAB {
       return 0;
     });
 
-    const finalMatches = [];
+    const finalMatches: FinalMatch[] = [];
 
     while (nearOrPerfectMatches.length > 0) {
-      const match = nearOrPerfectMatches.shift();
+      const match = nearOrPerfectMatches.shift()!;
       nearOrPerfectMatches = nearOrPerfectMatches.filter(
         (potentialMatch) =>
           potentialMatch.transactionId !== match.transactionId &&
@@ -142,9 +160,9 @@ export default class YNAB {
     return finalMatches;
   };
 
-  updateTransactions = async (matches) => {
+  updateTransactions = async (matches: FinalMatch[]): Promise<void> => {
     if (matches.length === 0) return;
-    await ynabAPI.transactions.updateTransactions(this.budget.id, {
+    await ynabAPI.transactions.updateTransactions(this.budget!.id, {
       transactions: matches.map((m) => {
         const id = m.transactionId;
         const memo = m.order.items.join(", ");
@@ -162,7 +180,7 @@ export default class YNAB {
     });
   };
 
-  matchAndUpdate = async (orders) => {
+  matchAndUpdate = async (orders: Order[]): Promise<void> => {
     const matches = this.matchTransactions(orders);
     if (matches.length > 0) {
       await this.updateTransactions(matches);
@@ -174,3 +192,5 @@ export default class YNAB {
     }
   };
 }
+
+export type { Order };

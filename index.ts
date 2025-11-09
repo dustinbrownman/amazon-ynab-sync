@@ -2,16 +2,17 @@ import "dotenv/config";
 import IMAP from "node-imap";
 import YNAB from "./ynab.js";
 import { historicalSearch, watchInbox } from "./mail.js";
+import { Order } from "./ynab.js";
 
 const INBOX_NAME = process.env.IMAP_INBOX_NAME || "INBOX";
 
-export const dollarFormat = (amt) =>
+export const dollarFormat = (amt: number): string =>
   amt.toLocaleString("en-US", {
     style: "currency",
     currency: "USD",
   });
 
-export const dateFormat = (date) =>
+export const dateFormat = (date: Date): string =>
   new Intl.DateTimeFormat("en-US", {
     year: "numeric",
     month: "2-digit",
@@ -23,11 +24,11 @@ export const dateFormat = (date) =>
   await ynab.init();
 
   const imap = new IMAP({
-    user: process.env.IMAP_USERNAME,
-    password: process.env.IMAP_PASSWORD,
-    host: process.env.IMAP_INCOMING_HOST,
-    port: process.env.IMAP_INCOMING_PORT,
-    tls: process.env.IMAP_TLS.toLowerCase() === "true",
+    user: process.env.IMAP_USERNAME || "",
+    password: process.env.IMAP_PASSWORD || "",
+    host: process.env.IMAP_INCOMING_HOST || "",
+    port: parseInt(process.env.IMAP_INCOMING_PORT || "993"),
+    tls: process.env.IMAP_TLS?.toLowerCase() === "true",
   });
 
   imap.once("ready", () => {
@@ -36,7 +37,7 @@ export const dateFormat = (date) =>
     imap.openBox(INBOX_NAME, true, async (err, box) => {
       if (err) throw err;
 
-      const orders = [];
+      const orders: Order[] = [];
 
       await historicalSearch(imap, ynab, box, orders);
 
