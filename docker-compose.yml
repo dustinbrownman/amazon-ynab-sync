@@ -10,7 +10,6 @@ services:
     env_file:
       - .env
     restart: unless-stopped
-    Uncomment to limit restart attempts
     deploy:
       restart_policy:
         condition: on-failure
