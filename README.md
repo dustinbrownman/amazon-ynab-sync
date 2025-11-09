@@ -147,3 +147,4 @@ docker rm amazon-ynab-sync
 ```
 
 **Note:** The `.env` file is not included in the Docker image for security reasons - it must be provided when running the container.
+
