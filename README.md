@@ -8,7 +8,7 @@ This **does not use Selenium** or headless browsers, or Amazon sign-in, which is
 
 ## Environment variables
 
-Please store your email credentials in environment variables or through a `.env` file. 
+Please store your email credentials in environment variables or through a `.env` file.
 
 ```
 IMAP_USERNAME=email@domain.com
@@ -51,3 +51,44 @@ It looks for matching transactions with blank memo's. If you don't like the memo
 ## Cache
 
 This is a stateless application, and uses no database. Everything exists in memory. It will cache YNAB transactions on start, and then only properly request new transactions through the API. If you decide to run this as a service, please introduce a restart count limit so that you don't spam YNAB API if there's a fatal bug and the application keeps restarting.
+
+
+## Running with Docker
+
+You can run this application using Docker for easier deployment and portability.
+
+### Build the Docker image
+
+```bash
+docker build -t amazon-ynab-sync .
+```
+
+### Run the container
+
+Make sure you have your `.env` file configured with all the required environment variables, then run:
+
+```bash
+docker run --env-file .env amazon-ynab-sync
+```
+
+The container will read your environment variables from the `.env` file at runtime. Note that the `.env` file is not included in the Docker image for security reasons - it must be provided when running the container.
+
+### Using Docker Compose (Optional)
+
+If you prefer using Docker Compose, create a `docker-compose.yml` file:
+
+```yaml
+version: '3'
+services:
+  amazon-ynab-sync:
+    build: .
+    env_file:
+      - .env
+    restart: unless-stopped
+```
+
+Then run:
+
+```bash
+docker-compose up -d
+```
