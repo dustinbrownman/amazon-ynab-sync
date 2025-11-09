@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  amazon-ynab-sync:
+    image: amazon-ynab-sync:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: amazon-ynab-sync
+    env_file:
+      - .env
+    restart: unless-stopped
+    Uncomment to limit restart attempts
+    deploy:
+      restart_policy:
+        condition: on-failure
+        max_attempts: 3
+        delay: 5s

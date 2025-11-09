@@ -89,38 +89,61 @@ This is a stateless application, and uses no database. Everything exists in memo
 
 You can run this application using Docker for easier deployment and portability.
 
-### Build the Docker image
+### Using Docker Compose (Recommended)
+
+The easiest way to run this application is with Docker Compose:
+
+1. Make sure you have your `.env` file configured with all required environment variables
+2. Build and start the container:
+
+```bash
+docker-compose up -d
+```
+
+3. View logs:
+
+```bash
+docker-compose logs -f
+```
+
+4. Stop the container:
+
+```bash
+docker-compose down
+```
+
+The `docker-compose.yml` file is configured with:
+- Auto-restart policy (`unless-stopped`)
+- Container name for easier management
+- Environment variable loading from `.env` file
+
+### Using Docker directly
+
+If you prefer to use Docker commands directly:
+
+#### Build the Docker image
 
 ```bash
 docker build -t amazon-ynab-sync .
 ```
 
-### Run the container
-
-Make sure you have your `.env` file configured with all the required environment variables, then run:
+#### Run the container
 
 ```bash
-docker run --env-file .env amazon-ynab-sync
+docker run --name amazon-ynab-sync --env-file .env --restart unless-stopped amazon-ynab-sync
 ```
 
-The container will read your environment variables from the `.env` file at runtime. Note that the `.env` file is not included in the Docker image for security reasons - it must be provided when running the container.
-
-### Using Docker Compose (Optional)
-
-If you prefer using Docker Compose, create a `docker-compose.yml` file:
-
-```yaml
-version: '3'
-services:
-  amazon-ynab-sync:
-    build: .
-    env_file:
-      - .env
-    restart: unless-stopped
-```
-
-Then run:
+#### View logs
 
 ```bash
-docker-compose up -d
+docker logs -f amazon-ynab-sync
 ```
+
+#### Stop and remove the container
+
+```bash
+docker stop amazon-ynab-sync
+docker rm amazon-ynab-sync
+```
+
+**Note:** The `.env` file is not included in the Docker image for security reasons - it must be provided when running the container.
