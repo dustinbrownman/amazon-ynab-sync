@@ -22,13 +22,11 @@ interface EmailHeader {
   body?: string;
 }
 
-const isAmazonEmail = ({ subject }: { subject: string }): boolean =>
-  subject.includes("Your Amazon.com order") &&
-  !subject.includes("has shipped") &&
-  !subject.includes("has been canceled");
+const isAmazonEmail = ({ from }: Email | EmailHeader): boolean =>
+  from.includes("auto-confirm@amazon.com");
 
 const scanEmail = (email: Email): Order | undefined => {
-  const { from, subject, body, attributes } = email;
+  const { subject, body, attributes } = email;
 
   if (!isAmazonEmail(email)) {
     console.log(
@@ -42,26 +40,81 @@ const scanEmail = (email: Email): Order | undefined => {
   const $ = cheerio.load(body.replace(/"x_/g, '"'));
 
   try {
-    const amount = parseFloat(
-      $('table[id$="costBreakdownRight"] td').text().trim().slice(1)
-    );
+    // Try to find the total amount - look for "Total" label and get adjacent cell value
+    let amount = 0;
+
+    // Method 1: Look for table with "Total" text and extract the dollar amount from the adjacent cell
+    $("table").each((_, table) => {
+      const $table = $(table);
+      const text = $table.text();
+      if (text.includes("Total")) {
+        // Look for dollar amounts in this table
+        const match = text.match(/\$(\d+\.\d{2})/);
+        if (match) {
+          amount = parseFloat(match[1]);
+          return false; // break out of each loop
+        }
+      }
+    });
+
+    // Method 2: Fallback to old selector if Method 1 didn't work
+    if (amount === 0) {
+      const costText = $('table[id$="costBreakdownRight"] td').text().trim();
+      if (costText && costText.startsWith("$")) {
+        amount = parseFloat(costText.slice(1));
+      }
+    }
 
     if (amount === 0) return;
 
     const items: string[] = [];
-    const itemRows = $('table[id$="itemDetails"] tr').toArray();
-    for (const itemRow of itemRows) {
-      // If you're here because you want the item names to be more detailed,
-      // I did not find anywhere in the email body that contains the full name
-      // for longer item titles
-      let title = $(itemRow).find("font").text().trim();
-      if (title.endsWith("...")) {
-        title = title.split(" ").slice(0, -1).join(" ");
-        if (title.endsWith(",")) title = title.slice(0, -1);
-        title += "..";
+
+    // Method 1: Look for links containing product names (more reliable for new format)
+    $("a").each((_, link) => {
+      const $link = $(link);
+      const href = $link.attr("href") || "";
+      const text = $link.text().trim();
+
+      // If link contains /dp/ or mentions product, and has meaningful text
+      if (
+        (href.includes("/dp/") || href.includes("asin")) &&
+        text.length > 0 &&
+        text.length < 200
+      ) {
+        // Filter out navigation links and common UI text
+        const excludePatterns = [
+          "View or edit order",
+          "Your Orders",
+          "Your Account",
+          "Buy Again",
+          "Track package",
+        ];
+        if (!excludePatterns.some((pattern) => text.includes(pattern))) {
+          // Clean up the title
+          let title = text;
+          if (title.endsWith("...")) {
+            title = title.split(" ").slice(0, -1).join(" ");
+            if (title.endsWith(",")) title = title.slice(0, -1);
+            title += "..";
+          }
+          items.push(title);
+        }
       }
-      if (title.length === 0) continue;
-      items.push(title);
+    });
+
+    // Method 2: Fallback to old selector for item details table
+    if (items.length === 0) {
+      const itemRows = $('table[id$="itemDetails"] tr').toArray();
+      for (const itemRow of itemRows) {
+        let title = $(itemRow).find("font").text().trim();
+        if (title.endsWith("...")) {
+          title = title.split(" ").slice(0, -1).join(" ");
+          if (title.endsWith(",")) title = title.slice(0, -1);
+          title += "..";
+        }
+        if (title.length === 0) continue;
+        items.push(title);
+      }
     }
 
     if (items.length === 0) return;
@@ -85,7 +138,10 @@ const scanEmail = (email: Email): Order | undefined => {
   }
 };
 
-const readEmail = (imapMsg: IMAP.ImapMessage, readBody = true): Promise<Email | EmailHeader> =>
+const readEmail = (
+  imapMsg: IMAP.ImapMessage,
+  readBody = true
+): Promise<Email | EmailHeader> =>
   new Promise((resolve, reject) => {
     let headers: any = null;
     let body: string | null = null;
@@ -131,7 +187,11 @@ const readEmail = (imapMsg: IMAP.ImapMessage, readBody = true): Promise<Email | 
     });
   });
 
-const fetchOrderEmails = async (seq: any, startIndex: number, endIndex: number): Promise<Email[]> =>
+const fetchOrderEmails = async (
+  seq: any,
+  startIndex: number,
+  endIndex: number
+): Promise<Email[]> =>
   new Promise((resolve, reject) => {
     const fetch = seq.fetch(`${startIndex}:${endIndex}`, {
       bodies: ["HEADER.FIELDS (FROM SUBJECT)", "TEXT"],
@@ -140,7 +200,7 @@ const fetchOrderEmails = async (seq: any, startIndex: number, endIndex: number):
     const emails: Email[] = [];
     fetch.on("message", async (imapMsg: any) => {
       try {
-        const email = await readEmail(imapMsg, true) as Email;
+        const email = (await readEmail(imapMsg, true)) as Email;
         emails.push(email);
       } catch (e) {
         console.error(e);
@@ -154,7 +214,12 @@ const fetchOrderEmails = async (seq: any, startIndex: number, endIndex: number):
     });
   });
 
-export const historicalSearch = async (imap: IMAP, ynab: YNAB, box: IMAP.Box, orders: Order[]): Promise<void> =>
+export const historicalSearch = async (
+  imap: IMAP,
+  ynab: YNAB,
+  box: IMAP.Box,
+  orders: Order[]
+): Promise<void> =>
   new Promise((resolve) => {
     console.log(
       `Searching back over last ${HISTORICAL_SEARCH_NUM_EMAILS} emails...`
@@ -175,7 +240,7 @@ export const historicalSearch = async (imap: IMAP, ynab: YNAB, box: IMAP.Box, or
       emailFetches.push(
         new Promise(async (resolve, reject) => {
           try {
-            const email = await readEmail(imapMsg, false) as EmailHeader;
+            const email = (await readEmail(imapMsg, false)) as EmailHeader;
             if (isAmazonEmail(email)) amazonMsgSeqNums.push(seqno);
             processedEmails++;
             console.log(
@@ -239,7 +304,12 @@ export const historicalSearch = async (imap: IMAP, ynab: YNAB, box: IMAP.Box, or
     });
   });
 
-export const watchInbox = (imap: IMAP, ynab: YNAB, box: IMAP.Box, orders: Order[]): void => {
+export const watchInbox = (
+  imap: IMAP,
+  ynab: YNAB,
+  box: IMAP.Box,
+  orders: Order[]
+): void => {
   imap.on("mail", async (newEmailCount: number) => {
     console.log(`${newEmailCount} new email(s), scanning contents...`);
     const endIndex = box.messages.total;
