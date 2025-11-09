@@ -24,15 +24,48 @@ YNAB_TOKEN=yourtokenhere
 YNAB_BUDGET_ID=123456-123456-12356-12356
 YNAB_ACCEPTABLE_DATE_DIFFERENCE=6
 YNAB_ACCEPTABLE_DOLLAR_DIFFERENCE=0.5
+
+# Optional: AI-powered category inference
+OPENAI_ENABLED=false
+OPENAI_API_KEY=sk-your-api-key-here
+OPENAI_MODEL=gpt-4o-mini
+OPENAI_EXCLUDED_CATEGORIES=Random spending,Misc
 ```
 
+### IMAP Configuration
+
 `HISTORICAL_SEARCH_NUM_EMAILS` is the number of existing emails to scan in your inbox. It is recommended to leave this at around 100-500 depending on how busy your inbox is, so that if the application restarts, it loads recent order confirmations into cache if transactions haven't posted yet.
+
+For iCloud emails, make sure to put in your iCloud email address, versus any email alias you may have set up through Apple. You will also need an app-specific password. Otherwise, please follow instructions from your email provider for IMAP.
+
+### YNAB Configuration
 
 `YNAB_ACCEPTABLE_DATE_DIFFERENCE` is the number of days a transaction out a transaction can be from the order date to be considered for a match.
 
 For `YNAB_ACCEPTABLE_DOLLAR_DIFFERENCE`, please see "Some Quirks" section.
 
-For iCloud emails, make sure to put in your iCloud email address, versus any email alias you may have set up through Apple. You will also need an app-specific password. Otherwise, please follow instructions from your email provider for IMAP.
+### AI Category Inference (Optional)
+
+This application can automatically categorize Amazon transactions using OpenAI's API. When enabled, it will:
+- Fetch your budget's categories from YNAB
+- Analyze the items in each Amazon order
+- Use AI to intelligently match the order to the most appropriate category
+- Automatically assign the category when updating the transaction
+
+To enable this feature:
+1. Set `OPENAI_ENABLED=true` in your `.env` file
+2. Add your OpenAI API key to `OPENAI_API_KEY` (get one at https://platform.openai.com/api-keys)
+3. Optionally specify a different model with `OPENAI_MODEL` (default: `gpt-4o-mini`)
+4. Optionally exclude certain categories with `OPENAI_EXCLUDED_CATEGORIES` (comma-separated list)
+
+**Excluding Categories:** If you have categories that you don't want the AI to use (e.g., "Random spending", "Miscellaneous"), add them to `OPENAI_EXCLUDED_CATEGORIES` as a comma-separated list. Category names are case-insensitive.
+
+Example:
+```
+OPENAI_EXCLUDED_CATEGORIES=Random spending,Miscellaneous,Uncategorized
+```
+
+**Note:** This feature is completely optional. If disabled, the application will work exactly as before, only adding memos to transactions without modifying categories.
 
 ## Some Quirks
 
@@ -51,7 +84,6 @@ It looks for matching transactions with blank memo's. If you don't like the memo
 ## Cache
 
 This is a stateless application, and uses no database. Everything exists in memory. It will cache YNAB transactions on start, and then only properly request new transactions through the API. If you decide to run this as a service, please introduce a restart count limit so that you don't spam YNAB API if there's a fatal bug and the application keeps restarting.
-
 
 ## Running with Docker
 

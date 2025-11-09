@@ -1,6 +1,7 @@
 import "dotenv/config";
 import * as ynab from "ynab";
 import { dollarFormat } from "./index.js";
+import * as AICategorizer from "./ai-categorizer.js";
 
 const ynabAPI = new ynab.API(process.env.YNAB_TOKEN || "");
 
@@ -36,6 +37,7 @@ export default class YNAB {
   budget: ynab.BudgetSummary | null = null;
   transactionsServerKnowledge: number | undefined = undefined;
   transactions: Record<string, ynab.TransactionDetail> = {}; // TODO: does not get updated on memo updates
+  categories: ynab.Category[] = [];
 
   static prettyTransaction = (t: ynab.TransactionDetail): string => {
     const amount = dollarFormat(t.amount / 1000);
@@ -56,11 +58,37 @@ export default class YNAB {
       );
 
     this.budget = budget;
+
+    // Fetch categories if AI categorization is enabled
+    if (AICategorizer.isEnabled()) {
+      await this.fetchCategories();
+    }
   };
 
-  getCachedTransactionCount = (): number => Object.keys(this.transactions).length;
+  fetchCategories = async (): Promise<void> => {
+    if (!this.budget) {
+      throw new Error("Budget not initialized");
+    }
 
-  fetchTransactions = async (sinceDate: Date | undefined = undefined): Promise<void> => {
+    console.log("Fetching budget categories...");
+    const categoriesResponse = await ynabAPI.categories.getCategories(
+      this.budget.id
+    );
+
+    // Flatten category groups into a single array of categories
+    this.categories = categoriesResponse.data.category_groups.flatMap(
+      (group) => group.categories
+    );
+
+    console.log(`Loaded ${this.categories.length} categories from YNAB`);
+  };
+
+  getCachedTransactionCount = (): number =>
+    Object.keys(this.transactions).length;
+
+  fetchTransactions = async (
+    sinceDate: Date | undefined = undefined
+  ): Promise<void> => {
     const { transactions, server_knowledge } = (
       await ynabAPI.transactions.getTransactions(
         this.budget!.id,
@@ -162,21 +190,54 @@ export default class YNAB {
 
   updateTransactions = async (matches: FinalMatch[]): Promise<void> => {
     if (matches.length === 0) return;
-    await ynabAPI.transactions.updateTransactions(this.budget!.id, {
-      transactions: matches.map((m) => {
+
+    // If AI categorization is enabled, infer categories for each match
+    const transactionUpdates = await Promise.all(
+      matches.map(async (m) => {
         const id = m.transactionId;
         const memo = m.order.items.join(", ");
         const transaction = this.transactions[id];
         transaction.memo = memo;
-        console.log(
-          `Adding memo "${memo} to ${YNAB.prettyTransaction(transaction)}`
-        );
+
+        let categoryId: string | undefined = undefined;
+
+        // Try to infer category using AI
+        if (AICategorizer.isEnabled() && this.categories.length > 0) {
+          const categoryMatch = await AICategorizer.inferCategory(
+            m.order.items,
+            this.categories
+          );
+          if (categoryMatch) {
+            categoryId = categoryMatch.categoryId;
+            console.log(
+              `Adding memo "${memo}" and category "${
+                categoryMatch.categoryName
+              }" to ${YNAB.prettyTransaction(transaction)}`
+            );
+          } else {
+            console.log(
+              `Adding memo "${memo}" to ${YNAB.prettyTransaction(
+                transaction
+              )} (AI categorization failed)`
+            );
+          }
+        } else {
+          console.log(
+            `Adding memo "${memo}" to ${YNAB.prettyTransaction(transaction)}`
+          );
+        }
+
         return {
           id,
           memo,
+          category_id: categoryId,
           approved: false,
         };
-      }),
+      })
+    );
+
+    await ynabAPI.transactions.updateTransactions(this.budget!.id, {
+      transactions: transactionUpdates,
     });
   };
 
