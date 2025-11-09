@@ -3,10 +3,11 @@
   "version": "1.0.0",
   "description": "Scans emails (IMAP) for Amazon order confirmations and syncs with YNAB (adds new transaction or syncs to existing)",
   "type": "module",
-  "main": "index.js",
+  "main": "dist/index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node index.js"
+    "build": "tsc",
+    "start": "npm run build && node dist/index.js"
   },
   "keywords": [
     "import",
@@ -23,5 +24,11 @@
     "node-imap": "^0.9.6",
     "quoted-printable": "^1.0.1",
     "ynab": "^2.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.0",
+    "@types/node-imap": "^0.9.3",
+    "@types/quoted-printable": "^1.0.2",
+    "typescript": "^5.9.3"
   }
 }
